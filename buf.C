@@ -15,44 +15,6 @@
 		     } \
                    }
 
-
-// Bufdesc class
-class BufDesc {
-    friend class BufMgr; 
-private:
-    File* file;     
-    int pageNo;     
-    int frameNo;    
-    int pinCnt;     
-    bool dirty;     
-    bool valid;     
-    bool refbit;    
-
-public:
-    BufDesc() { 
-        Clear(); 
-    }
-
-    void Clear() {
-        pinCnt = 0;
-        file = NULL;
-        pageNo = -1;
-        dirty = false;
-        refbit = false;
-        valid = false;
-    }
-
-    void Set(File* filePtr, int pageNum) {
-        file = filePtr;
-        pageNo = pageNum;
-        pinCnt = 1;
-        dirty = false;
-        refbit = true;
-        valid = true;
-    }
-};
-
-
 //----------------------------------------
 // Constructor of the class BufMgr
 //----------------------------------------
@@ -100,48 +62,128 @@ BufMgr::~BufMgr() {
     delete [] bufPool;
 }
 
+const Status BufMgr::allocBuf(int &frame) {
+    int startingPoint = clockHand;
+    bool foundFrame = false;
 
-const Status BufMgr::allocBuf(int & frame) 
-{
+    while (!foundFrame) {
+        advanceClock();
+        BufDesc &bufDesc = bufTable[clockHand];
 
+        // Check if this frame is free to use
+        if (!bufDesc.valid || bufDesc.pinCnt == 0) {
+            if (bufDesc.dirty) {
+                // If the frame is dirty, flush it before replacing
+                Status status = bufDesc.file->writePage(bufDesc.pageNo, &bufPool[clockHand]);
+                if (status != OK) return status;
+                bufDesc.dirty = false;
+            }
 
+            // Clear buffer entry and make it available
+            bufDesc.Clear();
+            frame = clockHand;
+            foundFrame = true;
+        }
 
+        // Stop if we've completed a full rotation without finding a frame
+        if (clockHand == startingPoint) return BUFFERFULL;
+    }
 
-
-
+    return OK;
 }
 
-	
-const Status BufMgr::readPage(File* file, const int PageNo, Page*& page)
-{
+const Status BufMgr::readPage(File* file, const int PageNo, Page*& page) {
+    int frameNo;
+    Status status = hashTable->lookup(file, PageNo, frameNo);
 
+    if (status == OK) {
+        // Page found in buffer pool
+        BufDesc &bufDesc = bufTable[frameNo];
+        bufDesc.pinCnt++;
+        page = &bufPool[frameNo];
+    } else if (status == NOMOREMEMORY) {
+        // Page not in buffer, allocate a new frame for it
+        Status allocStatus = allocBuf(frameNo);
+        if (allocStatus != OK) return allocStatus;
 
+        // Read page from file into allocated frame
+        Status readStatus = file->readPage(PageNo, &bufPool[frameNo]);
+        if (readStatus != OK) return readStatus;
 
+        // Update buffer metadata
+        hashTable->insert(file, PageNo, frameNo);
+        bufTable[frameNo].Set(file, PageNo);
+        bufTable[frameNo].pinCnt = 1;
+        page = &bufPool[frameNo];
+    } else {
+        return status;
+    }
 
+    return OK;
+}
 
+const Status BufMgr::unPinPage(File* file, const int PageNo, const bool dirty) {
+    int frameNo;
+    Status status = hashTable->lookup(file, PageNo, frameNo);
+    if (status != OK) return status;
+
+    BufDesc &bufDesc = bufTable[frameNo];
+
+    // Check if the page is already unpinned
+    if (bufDesc.pinCnt == 0) return PAGENOTPINNED;
+
+    // Decrement pin count and set dirty flag if needed
+    bufDesc.pinCnt--;
+    if (dirty) bufDesc.dirty = true;
+
+    return OK;
+}
+
+const Status BufMgr::allocPage(File* file, int& PageNo, Page*& page) {
+    // Allocate a new page in the file
+    Status status = file->allocatePage(PageNo);
+    if (status != OK) return status;
+
+    // Allocate a buffer for the new page
+    int frameNo;
+    status = allocBuf(frameNo);
+    if (status != OK) return status;
+
+    // Initialize page in buffer
+    memset(&bufPool[frameNo], 0, sizeof(Page));
+    hashTable->insert(file, PageNo, frameNo);
+    bufTable[frameNo].Set(file, PageNo);
+    bufTable[frameNo].pinCnt = 1;
+    page = &bufPool[frameNo];
+
+    return OK;
+}
+
+const Status BufMgr::flushFile(File* file) {
+    for (int i = 0; i < numBufs; i++) {
+        BufDesc &bufDesc = bufTable[i];
+        
+        // Check if the frame is valid and belongs to the specified file
+        if (bufDesc.valid && bufDesc.file == file) {
+            if (bufDesc.pinCnt > 0) return PAGEPINNED;
+
+            if (bufDesc.dirty) {
+                Status status = bufDesc.file->writePage(bufDesc.pageNo, &bufPool[i]);
+                if (status != OK) return status;
+                bufDesc.dirty = false;
+            }
+
+            // Remove the page from hashTable and mark frame as invalid
+            hashTable->remove(file, bufDesc.pageNo);
+            bufDesc.Clear();
+        }
+    }
+
+    return OK;
 }
 
 
-const Status BufMgr::unPinPage(File* file, const int PageNo, 
-			       const bool dirty) 
-{
 
-
-
-
-
-}
-
-const Status BufMgr::allocPage(File* file, int& pageNo, Page*& page) 
-{
-
-
-
-
-
-
-
-}
 
 const Status BufMgr::disposePage(File* file, const int pageNo) 
 {
