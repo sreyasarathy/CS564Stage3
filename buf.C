@@ -40,6 +40,191 @@ BufMgr::BufMgr(const int bufs)
     clockHand = bufs - 1;
 }
 
+int BufHashTbl::hash(const File* file, const int pageNo) {
+    return (std::hash<const File*>()(file) + pageNo) % HTSIZE;
+}
+
+Status BufHashTbl::insert(const File* file, const int pageNo, const int frameNo) {
+    int currentIndex = hash(file, pageNo);
+    hashBucket* currentEntry = ht[currentIndex];
+
+    while(currentEntry != nullptr) {
+        if(currentEntry->file == file && currentEntry->pageNo == pageNo) {
+            return HASHTBLERROR;
+            //already exists so error
+        }
+
+        currentEntry = currentEntry->next;
+    }
+
+    hashBucket* newEntry = new hashBucket();
+    //it wouldn't let me just do = file due to const issues
+    newEntry->file = const_cast<File*>(file); 
+    newEntry->pageNo = pageNo;
+    newEntry->frameNo = frameNo;
+    newEntry->next = ht[currentIndex];
+    ht[currentIndex] = newEntry;
+
+    return OK;
+
+
+
+}
+
+
+int BufHashTbl::hash(const File* file, const int pageNo) {
+    return (std::hash<const File*>()(file) + pageNo) % HTSIZE;
+}
+
+Status BufHashTbl::insert(const File* file, const int pageNo, const int frameNo) {
+    int currentIndex = hash(file, pageNo);
+    hashBucket* currentEntry = ht[currentIndex];
+
+    while(currentEntry != nullptr) {
+        if(currentEntry->file == file && currentEntry->pageNo == pageNo) {
+            return HASHTBLERROR;
+            //already exists so error
+        }
+
+        currentEntry = currentEntry->next;
+    }
+
+    hashBucket* newEntry = new hashBucket();
+    //it wouldn't let me just do = file due to const issues
+    newEntry->file = const_cast<File*>(file); 
+    newEntry->pageNo = pageNo;
+    newEntry->frameNo = frameNo;
+    newEntry->next = ht[currentIndex];
+    ht[currentIndex] = newEntry;
+
+    return OK;
+
+
+
+}
+
+Status BufHashTbl::lookup(const File* file, const int pageNo, int& frameNo)  {
+    int currentIndex = hash(file, pageNo);
+    hashBucket* currentEntry = ht[currentIndex];
+
+    while(currentEntry != nullptr) {
+        if(currentEntry->file == file && currentEntry->pageNo == pageNo) {
+            frameNo = currentEntry->frameNo;
+            return OK;
+            //spec is confusing, do we return frameNo or OK
+        }
+        currentEntry = currentEntry->next;
+    }
+
+    return HASHNOTFOUND;
+}
+
+Status BufHashTbl::remove(const File* file, const int pageNo) {
+    int currentIndex = hash(file, pageNo);
+    hashBucket* currentEntry = ht[currentIndex];
+    hashBucket* prev = nullptr;
+
+    while(currentEntry != nullptr) {
+        if(currentEntry->file == file && currentEntry->pageNo == pageNo) {
+            if(prev == nullptr) {
+                ht[currentIndex] = currentEntry->next;
+            } else {
+                prev->next = currentEntry->next;
+            }
+            delete currentEntry;
+            return OK;
+        }
+
+        prev = currentEntry;
+        currentEntry = currentEntry->next;
+    }
+
+    return HASHNOTFOUND;
+
+}
+
+Status BufHashTbl::lookup(const File* file, const int pageNo, int& frameNo)  {
+    int currentIndex = hash(file, pageNo);
+    hashBucket* currentEntry = ht[currentIndex];
+
+    while(currentEntry != nullptr) {
+        if(currentEntry->file == file && currentEntry->pageNo == pageNo) {
+            frameNo = currentEntry->frameNo;
+            return OK;
+            //spec is confusing, do we return frameNo or OK
+        }
+        currentEntry = currentEntry->next;
+    }
+
+    return HASHNOTFOUND;
+}
+
+Status BufHashTbl::remove(const File* file, const int pageNo) {
+    int currentIndex = hash(file, pageNo);
+    hashBucket* currentEntry = ht[currentIndex];
+    hashBucket* prev = nullptr;
+
+    while(currentEntry != nullptr) {
+        if(currentEntry->file == file && currentEntry->pageNo == pageNo) {
+            if(prev == nullptr) {
+                ht[currentIndex] = currentEntry->next;
+            } else {
+                prev->next = currentEntry->next;
+            }
+            delete currentEntry;
+            return OK;
+        }
+
+        prev = currentEntry;
+        currentEntry = currentEntry->next;
+    }
+
+    return HASHNOTFOUND;
+
+}
+
+
+// Bufdesc class
+class BufDesc {
+    friend class BufMgr; 
+private:
+    File* file;     
+    int pageNo;     
+    int frameNo;    
+    int pinCnt;     
+    bool dirty;     
+    bool valid;     
+    bool refbit;    
+
+public:
+    BufDesc() { 
+        Clear(); 
+    }
+
+    void Clear() {
+        pinCnt = 0;
+        file = NULL;
+        pageNo = -1;
+        dirty = false;
+        refbit = false;
+        valid = false;
+    }
+
+    void Set(File* filePtr, int pageNum) {
+        file = filePtr;
+        pageNo = pageNum;
+        pinCnt = 1;
+        dirty = false;
+        refbit = true;
+        valid = true;
+    }
+};
+
+
+
+
+
+
 
 BufMgr::~BufMgr() {
 
@@ -181,9 +366,6 @@ const Status BufMgr::flushFile(File* file) {
 
     return OK;
 }
-
-
-
 
 const Status BufMgr::disposePage(File* file, const int pageNo) 
 {
