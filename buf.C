@@ -7,26 +7,25 @@
 #include <stdio.h>
 #include "page.h"
 #include "buf.h"
+#include "error.h"
 
 #define ASSERT(c)  { if (!(c)) { \
-		       cerr << "At line " << __LINE__ << ":" << endl << "  "; \
+                       cerr << "At line " << __LINE__ << ":" << endl << "  "; \
                        cerr << "This condition should hold: " #c << endl; \
                        exit(1); \
-		     } \
+                     } \
                    }
 
 //----------------------------------------
 // Constructor of the class BufMgr
 //----------------------------------------
 
-BufMgr::BufMgr(const int bufs)
-{
+BufMgr::BufMgr(const int bufs) {
     numBufs = bufs;
 
     bufTable = new BufDesc[bufs];
     memset(bufTable, 0, bufs * sizeof(BufDesc));
-    for (int i = 0; i < bufs; i++) 
-    {
+    for (int i = 0; i < bufs; i++) {
         bufTable[i].frameNo = i;
         bufTable[i].valid = false;
     }
@@ -34,219 +33,27 @@ BufMgr::BufMgr(const int bufs)
     bufPool = new Page[bufs];
     memset(bufPool, 0, bufs * sizeof(Page));
 
-    int htsize = ((((int) (bufs * 1.2))*2)/2)+1;
-    hashTable = new BufHashTbl (htsize);  // allocate the buffer hash table
+    int htsize = ((((int)(bufs * 1.2)) * 2) / 2) + 1;
+    hashTable = new BufHashTbl(htsize);
 
     clockHand = bufs - 1;
 }
 
-int BufHashTbl::hash(const File* file, const int pageNo) {
-    return (std::hash<const File*>()(file) + pageNo) % HTSIZE;
-}
-
-Status BufHashTbl::insert(const File* file, const int pageNo, const int frameNo) {
-    int currentIndex = hash(file, pageNo);
-    hashBucket* currentEntry = ht[currentIndex];
-
-    while(currentEntry != nullptr) {
-        if(currentEntry->file == file && currentEntry->pageNo == pageNo) {
-            return HASHTBLERROR;
-            //already exists so error
-        }
-
-        currentEntry = currentEntry->next;
-    }
-
-    hashBucket* newEntry = new hashBucket();
-    //it wouldn't let me just do = file due to const issues
-    newEntry->file = const_cast<File*>(file); 
-    newEntry->pageNo = pageNo;
-    newEntry->frameNo = frameNo;
-    newEntry->next = ht[currentIndex];
-    ht[currentIndex] = newEntry;
-
-    return OK;
-
-
-
-}
-
-
-int BufHashTbl::hash(const File* file, const int pageNo) {
-    return (std::hash<const File*>()(file) + pageNo) % HTSIZE;
-}
-
-Status BufHashTbl::insert(const File* file, const int pageNo, const int frameNo) {
-    int currentIndex = hash(file, pageNo);
-    hashBucket* currentEntry = ht[currentIndex];
-
-    while(currentEntry != nullptr) {
-        if(currentEntry->file == file && currentEntry->pageNo == pageNo) {
-            return HASHTBLERROR;
-            //already exists so error
-        }
-
-        currentEntry = currentEntry->next;
-    }
-
-    hashBucket* newEntry = new hashBucket();
-    //it wouldn't let me just do = file due to const issues
-    newEntry->file = const_cast<File*>(file); 
-    newEntry->pageNo = pageNo;
-    newEntry->frameNo = frameNo;
-    newEntry->next = ht[currentIndex];
-    ht[currentIndex] = newEntry;
-
-    return OK;
-
-
-
-}
-
-Status BufHashTbl::lookup(const File* file, const int pageNo, int& frameNo)  {
-    int currentIndex = hash(file, pageNo);
-    hashBucket* currentEntry = ht[currentIndex];
-
-    while(currentEntry != nullptr) {
-        if(currentEntry->file == file && currentEntry->pageNo == pageNo) {
-            frameNo = currentEntry->frameNo;
-            return OK;
-            //spec is confusing, do we return frameNo or OK
-        }
-        currentEntry = currentEntry->next;
-    }
-
-    return HASHNOTFOUND;
-}
-
-Status BufHashTbl::remove(const File* file, const int pageNo) {
-    int currentIndex = hash(file, pageNo);
-    hashBucket* currentEntry = ht[currentIndex];
-    hashBucket* prev = nullptr;
-
-    while(currentEntry != nullptr) {
-        if(currentEntry->file == file && currentEntry->pageNo == pageNo) {
-            if(prev == nullptr) {
-                ht[currentIndex] = currentEntry->next;
-            } else {
-                prev->next = currentEntry->next;
-            }
-            delete currentEntry;
-            return OK;
-        }
-
-        prev = currentEntry;
-        currentEntry = currentEntry->next;
-    }
-
-    return HASHNOTFOUND;
-
-}
-
-Status BufHashTbl::lookup(const File* file, const int pageNo, int& frameNo)  {
-    int currentIndex = hash(file, pageNo);
-    hashBucket* currentEntry = ht[currentIndex];
-
-    while(currentEntry != nullptr) {
-        if(currentEntry->file == file && currentEntry->pageNo == pageNo) {
-            frameNo = currentEntry->frameNo;
-            return OK;
-            //spec is confusing, do we return frameNo or OK
-        }
-        currentEntry = currentEntry->next;
-    }
-
-    return HASHNOTFOUND;
-}
-
-Status BufHashTbl::remove(const File* file, const int pageNo) {
-    int currentIndex = hash(file, pageNo);
-    hashBucket* currentEntry = ht[currentIndex];
-    hashBucket* prev = nullptr;
-
-    while(currentEntry != nullptr) {
-        if(currentEntry->file == file && currentEntry->pageNo == pageNo) {
-            if(prev == nullptr) {
-                ht[currentIndex] = currentEntry->next;
-            } else {
-                prev->next = currentEntry->next;
-            }
-            delete currentEntry;
-            return OK;
-        }
-
-        prev = currentEntry;
-        currentEntry = currentEntry->next;
-    }
-
-    return HASHNOTFOUND;
-
-}
-
-
-// Bufdesc class
-class BufDesc {
-    friend class BufMgr; 
-private:
-    File* file;     
-    int pageNo;     
-    int frameNo;    
-    int pinCnt;     
-    bool dirty;     
-    bool valid;     
-    bool refbit;    
-
-public:
-    BufDesc() { 
-        Clear(); 
-    }
-
-    void Clear() {
-        pinCnt = 0;
-        file = NULL;
-        pageNo = -1;
-        dirty = false;
-        refbit = false;
-        valid = false;
-    }
-
-    void Set(File* filePtr, int pageNum) {
-        file = filePtr;
-        pageNo = pageNum;
-        pinCnt = 1;
-        dirty = false;
-        refbit = true;
-        valid = true;
-    }
-};
-
-
-
-
-
-
-
 BufMgr::~BufMgr() {
-
-    // flush out all unwritten pages
-    for (int i = 0; i < numBufs; i++) 
-    {
+    for (int i = 0; i < numBufs; i++) {
         BufDesc* tmpbuf = &bufTable[i];
-        if (tmpbuf->valid == true && tmpbuf->dirty == true) {
-
-#ifdef DEBUGBUF
-            cout << "flushing page " << tmpbuf->pageNo
-                 << " from frame " << i << endl;
-#endif
-
+        if (tmpbuf->valid && tmpbuf->dirty) {
             tmpbuf->file->writePage(tmpbuf->pageNo, &(bufPool[i]));
         }
     }
 
-    delete [] bufTable;
-    delete [] bufPool;
+    delete[] bufTable;
+    delete[] bufPool;
 }
 
+//----------------------------------------
+// Buffer Allocation
+//----------------------------------------
 const Status BufMgr::allocBuf(int &frame) {
     int startingPoint = clockHand;
     bool foundFrame = false;
@@ -255,51 +62,49 @@ const Status BufMgr::allocBuf(int &frame) {
         advanceClock();
         BufDesc &bufDesc = bufTable[clockHand];
 
-        // Check if this frame is free to use
         if (!bufDesc.valid || bufDesc.pinCnt == 0) {
             if (bufDesc.dirty) {
-                // If the frame is dirty, flush it before replacing
                 Status status = bufDesc.file->writePage(bufDesc.pageNo, &bufPool[clockHand]);
                 if (status != OK) return status;
                 bufDesc.dirty = false;
             }
-
-            // Clear buffer entry and make it available
             bufDesc.Clear();
             frame = clockHand;
             foundFrame = true;
+            cout << "Allocated buffer frame: " << frame << " for new page" << endl;
         }
 
-        // Stop if we've completed a full rotation without finding a frame
-        if (clockHand == startingPoint) return BUFFERFULL;
+        if (clockHand == startingPoint) return BUFFEREXCEEDED;
     }
 
     return OK;
 }
 
+//----------------------------------------
+// Read Page
+//----------------------------------------
 const Status BufMgr::readPage(File* file, const int PageNo, Page*& page) {
+    cout << "Reading page: File=" << file << ", PageNo=" << PageNo << endl;
     int frameNo;
     Status status = hashTable->lookup(file, PageNo, frameNo);
 
     if (status == OK) {
-        // Page found in buffer pool
         BufDesc &bufDesc = bufTable[frameNo];
         bufDesc.pinCnt++;
         page = &bufPool[frameNo];
-    } else if (status == NOMOREMEMORY) {
-        // Page not in buffer, allocate a new frame for it
+        cout << "Page found in buffer pool. FrameNo=" << frameNo << ", PinCnt=" << bufDesc.pinCnt << endl;
+    } else if (status == BUFFEREXCEEDED) {
         Status allocStatus = allocBuf(frameNo);
         if (allocStatus != OK) return allocStatus;
 
-        // Read page from file into allocated frame
         Status readStatus = file->readPage(PageNo, &bufPool[frameNo]);
         if (readStatus != OK) return readStatus;
 
-        // Update buffer metadata
         hashTable->insert(file, PageNo, frameNo);
         bufTable[frameNo].Set(file, PageNo);
         bufTable[frameNo].pinCnt = 1;
         page = &bufPool[frameNo];
+        cout << "Page loaded into buffer. File=" << file << ", PageNo=" << PageNo << ", FrameNo=" << frameNo << endl;
     } else {
         return status;
     }
@@ -307,6 +112,9 @@ const Status BufMgr::readPage(File* file, const int PageNo, Page*& page) {
     return OK;
 }
 
+//----------------------------------------
+// Unpin Page
+//----------------------------------------
 const Status BufMgr::unPinPage(File* file, const int PageNo, const bool dirty) {
     int frameNo;
     Status status = hashTable->lookup(file, PageNo, frameNo);
@@ -314,41 +122,50 @@ const Status BufMgr::unPinPage(File* file, const int PageNo, const bool dirty) {
 
     BufDesc &bufDesc = bufTable[frameNo];
 
-    // Check if the page is already unpinned
     if (bufDesc.pinCnt == 0) return PAGENOTPINNED;
 
-    // Decrement pin count and set dirty flag if needed
+    cout << "Unpinning page: File=" << file << ", PageNo=" << PageNo 
+         << ", Dirty=" << dirty << ", PinCnt=" << bufDesc.pinCnt << endl;
+
+    if (dirty) {
+        bufDesc.dirty = true;
+        cout << "Page marked as dirty: File=" << file << ", PageNo=" << PageNo << endl;
+    }
+
     bufDesc.pinCnt--;
-    if (dirty) bufDesc.dirty = true;
 
     return OK;
 }
 
+//----------------------------------------
+// Allocate Page
+//----------------------------------------
 const Status BufMgr::allocPage(File* file, int& PageNo, Page*& page) {
-    // Allocate a new page in the file
     Status status = file->allocatePage(PageNo);
     if (status != OK) return status;
 
-    // Allocate a buffer for the new page
     int frameNo;
     status = allocBuf(frameNo);
     if (status != OK) return status;
 
-    // Initialize page in buffer
     memset(&bufPool[frameNo], 0, sizeof(Page));
     hashTable->insert(file, PageNo, frameNo);
     bufTable[frameNo].Set(file, PageNo);
     bufTable[frameNo].pinCnt = 1;
     page = &bufPool[frameNo];
 
+    cout << "Allocated new page: File=" << file << ", PageNo=" << PageNo << ", FrameNo=" << frameNo << endl;
+
     return OK;
 }
 
-const Status BufMgr::flushFile(File* file) {
+//----------------------------------------
+// Flush File
+//----------------------------------------
+const Status BufMgr::flushFile(const File* file) {
     for (int i = 0; i < numBufs; i++) {
         BufDesc &bufDesc = bufTable[i];
-        
-        // Check if the frame is valid and belongs to the specified file
+
         if (bufDesc.valid && bufDesc.file == file) {
             if (bufDesc.pinCnt > 0) return PAGEPINNED;
 
@@ -358,7 +175,6 @@ const Status BufMgr::flushFile(File* file) {
                 bufDesc.dirty = false;
             }
 
-            // Remove the page from hashTable and mark frame as invalid
             hashTable->remove(file, bufDesc.pageNo);
             bufDesc.Clear();
         }
@@ -367,75 +183,17 @@ const Status BufMgr::flushFile(File* file) {
     return OK;
 }
 
-const Status BufMgr::disposePage(File* file, const int pageNo) 
-{
-    // see if it is in the buffer pool
-    Status status = OK;
-    int frameNo = 0;
-    status = hashTable->lookup(file, pageNo, frameNo);
-    if (status == OK)
-    {
-        // clear the page
-        bufTable[frameNo].Clear();
-    }
-    status = hashTable->remove(file, pageNo);
-
-    // deallocate it in the file
-    return file->disposePage(pageNo);
-}
-
-const Status BufMgr::flushFile(const File* file) 
-{
-  Status status;
-
-  for (int i = 0; i < numBufs; i++) {
-    BufDesc* tmpbuf = &(bufTable[i]);
-    if (tmpbuf->valid == true && tmpbuf->file == file) {
-
-      if (tmpbuf->pinCnt > 0)
-	  return PAGEPINNED;
-
-      if (tmpbuf->dirty == true) {
-#ifdef DEBUGBUF
-	cout << "flushing page " << tmpbuf->pageNo
-             << " from frame " << i << endl;
-#endif
-	if ((status = tmpbuf->file->writePage(tmpbuf->pageNo,
-					      &(bufPool[i]))) != OK)
-	  return status;
-
-	tmpbuf->dirty = false;
-      }
-
-      hashTable->remove(file,tmpbuf->pageNo);
-
-      tmpbuf->file = NULL;
-      tmpbuf->pageNo = -1;
-      tmpbuf->valid = false;
-    }
-
-    else if (tmpbuf->valid == false && tmpbuf->file == file)
-      return BADBUFFER;
-  }
-  
-  return OK;
-}
-
-
-void BufMgr::printSelf(void) 
-{
+//----------------------------------------
+// Print Buffer State
+//----------------------------------------
+void BufMgr::printSelf(void) {
     BufDesc* tmpbuf;
-  
-    cout << endl << "Print buffer...\n";
-    for (int i=0; i<numBufs; i++) {
+
+    cout << endl << "Printing buffer status...\n";
+    for (int i = 0; i < numBufs; i++) {
         tmpbuf = &(bufTable[i]);
-        cout << i << "\t" << (char*)(&bufPool[i]) 
-             << "\tpinCnt: " << tmpbuf->pinCnt;
-    
-        if (tmpbuf->valid == true)
-            cout << "\tvalid\n";
-        cout << endl;
-    };
+        cout << "Frame " << i << ": PageNo=" << tmpbuf->pageNo 
+             << ", PinCnt=" << tmpbuf->pinCnt << ", Dirty=" << tmpbuf->dirty
+             << ", Valid=" << tmpbuf->valid << endl;
+    }
 }
-
-
